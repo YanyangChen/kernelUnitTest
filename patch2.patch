@@ -1,0 +1,93 @@
+diff --git a/drivers/misc/example.c b/drivers/misc/example.c
+index 846806ddac3e..cb7be87cc70f 100644
+--- a/drivers/misc/example.c
++++ b/drivers/misc/example.c
+@@ -1,5 +1,6 @@
+ #include <linux/errno.h>
+ #include <linux/slab.h>
++#include <linux/gfp.h>
+ #include "example.h"
+ 
+ int misc_example_add(int left, int right)
+@@ -14,6 +15,10 @@ int compare_kalloc(void* km1, void* km2)
+ 	return ksize(km1) - ksize(km2);
+ }
+ 
++int compare_pages(struct page* p1,struct page* p2){
++	return ksize(p1) - ksize(p2);
++}
++
+ char* print_char(void)
+ {
+ 	char * s = "testing\n";
+diff --git a/drivers/misc/example.h b/drivers/misc/example.h
+index d2d4d7de1cd1..7cbbc2b2c99a 100644
+--- a/drivers/misc/example.h
++++ b/drivers/misc/example.h
+@@ -4,3 +4,4 @@ char* print_char(void);
+ int char_arr_cmp(const char* s1, const char* s2);
+ char* print_char_input(char* input);//char* is almost the same as char[]
+ int compare_kalloc(void* km1, void* km2);
++int compare_pages(struct page* p1,struct page* p2);
+diff --git a/drivers/misc/example_test.c b/drivers/misc/example_test.c
+index 8975919c8709..34319b031185 100644
+--- a/drivers/misc/example_test.c
++++ b/drivers/misc/example_test.c
+@@ -1,5 +1,6 @@
+ #include <kunit/test.h>
+ #include <linux/slab.h>
++#include <linux/gfp.h>
+ #include "example.h"
+ 
+ 	/* Define the test cases. */
+@@ -90,6 +91,40 @@ static void test_compare_kalloc(struct kunit *test)
+ 	void* k2 = kmalloc(16, GFP_KERNEL);
+ 	KUNIT_EXPECT_EQ(test, 0, compare_kalloc(k1,k2));
+ }
++
++
++static void test_compare_pages(struct kunit *test)
++{
++
++	void* p1 = alloc_page(GFP_KERNEL);
++	void* p2 = alloc_page(GFP_KERNEL);
++	KUNIT_EXPECT_EQ(test, 0, compare_pages(p1,p2));
++}
++
++static void test_compare_pages_in_order(struct kunit *test)
++{
++	struct page *p1 = alloc_pages(GFP_KERNEL,1);
++	struct page *p2 = alloc_page(GFP_KERNEL);
++	struct list_head *lh = &p2->lru;
++	struct list_head *nh = lh->next;
++	//struct list_head *lh = p2->lru.next;
++
++	p2 = container_of(lh, struct page, lru);
++	KUNIT_EXPECT_EQ(test, 0, compare_pages(p1,p2));
++}
++
++
++static void test_compare_pages_in_order2(struct kunit *test)
++{
++	struct page *p1 = alloc_pages(GFP_KERNEL,2);
++	struct page *p2 = alloc_page(GFP_KERNEL);
++	struct list_head *lh = p1->lru.next;
++	//struct list_head *nh = lh->next;
++	//struct list_head *lh = p2->lru.next;
++
++	p2 = container_of(lh, struct page, lru);
++	KUNIT_EXPECT_EQ(test, 0, compare_pages(p1,p2));
++}
+ static struct kunit_case misc_example_test_cases[] = {
+ 	KUNIT_CASE(misc_example_add_test_basic),
+ 	//KUNIT_CASE(misc_example_test_failure),
+@@ -102,6 +137,9 @@ static struct kunit_case misc_example_test_cases[] = {
+ 	KUNIT_CASE(list_del_init_test),
+ 	KUNIT_CASE(test_strcmp),
+ 	KUNIT_CASE(test_compare_kalloc),
++	KUNIT_CASE(test_compare_pages),
++	KUNIT_CASE(test_compare_pages_in_order),
++	KUNIT_CASE(test_compare_pages_in_order2),
+ 	{}
+ };
+ 
