@@ -1,0 +1,307 @@
+diff --git a/Documentation/dev-tools/kunit/example.c b/Documentation/dev-tools/kunit/example.c
+new file mode 100644
+index 000000000000..1ca8889f075f
+--- /dev/null
++++ b/Documentation/dev-tools/kunit/example.c
+@@ -0,0 +1,7 @@
++#include <linux/errno.h>
++#include "example.h"
++
++int misc_example_add(int left, int right)
++{
++	return left + right;
++}
+diff --git a/drivers/misc/Kconfig b/drivers/misc/Kconfig
+index 41d2bb0ae23a..eff53788ab17 100644
+--- a/drivers/misc/Kconfig
++++ b/drivers/misc/Kconfig
+@@ -9,6 +9,16 @@ config SENSORS_LIS3LV02D
+ 	tristate
+ 	depends on INPUT
+ 
++config MISC_EXAMPLE
++	bool "My example"
++
++
++config MISC_EXAMPLE_TEST
++	tristate "Test for my example" if !KUNIT_ALL_TESTS
++	depends on MISC_EXAMPLE && KUNIT=y
++	default KUNIT_ALL_TESTS
++
++
+ config AD525X_DPOT
+ 	tristate "Analog Devices Digital Potentiometers"
+ 	depends on (I2C || SPI) && SYSFS
+diff --git a/drivers/misc/Makefile b/drivers/misc/Makefile
+index 70e800e9127f..ed8159522b62 100644
+--- a/drivers/misc/Makefile
++++ b/drivers/misc/Makefile
+@@ -60,3 +60,5 @@ obj-$(CONFIG_XILINX_SDFEC)	+= xilinx_sdfec.o
+ obj-$(CONFIG_HISI_HIKEY_USB)	+= hisi_hikey_usb.o
+ obj-$(CONFIG_HI6421V600_IRQ)	+= hi6421v600-irq.o
+ obj-$(CONFIG_OPEN_DICE)		+= open-dice.o
++obj-$(CONFIG_MISC_EXAMPLE) 	+= example.o
++obj-$(CONFIG_MISC_EXAMPLE_TEST) += example_test.o
+diff --git a/drivers/misc/example.c b/drivers/misc/example.c
+new file mode 100644
+index 000000000000..cb7be87cc70f
+--- /dev/null
++++ b/drivers/misc/example.c
+@@ -0,0 +1,50 @@
++#include <linux/errno.h>
++#include <linux/slab.h>
++#include <linux/gfp.h>
++#include "example.h"
++
++int misc_example_add(int left, int right)
++{
++	return left + right;
++}
++
++int compare_kalloc(void* km1, void* km2)
++{
++	//https://elixir.bootlin.com/linux/v5.19-rc3/A/ident/kmalloc
++	//https://www.kernel.org/doc/htmldocs/kernel-api/mm.html#id-1.6.2
++	return ksize(km1) - ksize(km2);
++}
++
++int compare_pages(struct page* p1,struct page* p2){
++	return ksize(p1) - ksize(p2);
++}
++
++char* print_char(void)
++{
++	char * s = "testing\n";
++	return s;
++}
++
++
++char* print_char_input(char* input)
++{
++	char * s = input;
++	return s;
++}
++
++int print_char_size(void)
++{
++	char s[] = "testing\n";
++	int len = sizeof(s);
++	return len;
++}
++
++//https://stackoverflow.com/questions/17559996/c-kernel-string-concat-and-comparison
++int char_arr_cmp(const char* s1,const char* s2)
++{
++    while(*s1 && (*s1==*s2))
++    	   {s1++,
++	    s2++;}
++    return *(const unsigned char*)s1-*(const unsigned char*)s2;
++}
++
+diff --git a/drivers/misc/example.h b/drivers/misc/example.h
+new file mode 100644
+index 000000000000..7cbbc2b2c99a
+--- /dev/null
++++ b/drivers/misc/example.h
+@@ -0,0 +1,7 @@
++int misc_example_add(int left, int right);
++int print_char_size(void);
++char* print_char(void);
++int char_arr_cmp(const char* s1, const char* s2);
++char* print_char_input(char* input);//char* is almost the same as char[]
++int compare_kalloc(void* km1, void* km2);
++int compare_pages(struct page* p1,struct page* p2);
+diff --git a/drivers/misc/example_test.c b/drivers/misc/example_test.c
+new file mode 100644
+index 000000000000..d2a69183fad9
+--- /dev/null
++++ b/drivers/misc/example_test.c
+@@ -0,0 +1,188 @@
++#include <kunit/test.h>
++#include <linux/slab.h>
++#include <linux/gfp.h>
++#include <linux/highmem.h>
++#include "example.h"
++
++	/* Define the test cases. */
++static void misc_example_add_test_basic(struct kunit *test)
++{
++	KUNIT_EXPECT_EQ(test, 1, misc_example_add(1, 0));
++	KUNIT_EXPECT_EQ(test, 2, misc_example_add(1, 1));
++	KUNIT_EXPECT_EQ(test, 0, misc_example_add(-1, 1));
++	KUNIT_EXPECT_EQ(test, INT_MAX, misc_example_add(0, INT_MAX));
++	KUNIT_EXPECT_EQ(test, -1, misc_example_add(INT_MAX, INT_MIN));
++}
++
++static void test_print_char_size(struct kunit *test)
++{
++	KUNIT_EXPECT_EQ(test, 9, print_char_size());
++}
++
++static void test_print_char(struct kunit *test)
++{
++	char *s = print_char();
++	KUNIT_EXPECT_EQ(test, 't', *s);
++}
++
++
++static void test_print_char_input(struct kunit *test)
++{
++	char *s = print_char_input("testing");
++	KUNIT_EXPECT_EQ(test, 't', *s);
++}
++
++
++static void test_compare_char_each(struct kunit *test)
++{
++	char * s1 = "testing\n";
++	char * s2 = print_char();
++	KUNIT_EXPECT_EQ(test, 0, char_arr_cmp(s1,s2));
++}
++
++static void test_compare_char_each_input(struct kunit *test)
++{
++	char * s1 = "testing\n";
++	char * s2 = print_char_input("testing\n");
++	KUNIT_EXPECT_EQ(test, 0, char_arr_cmp(s1,s2));
++}
++
++
++static void misc_example_test_failure(struct kunit *test)
++{
++	KUNIT_FAIL(test, "This test never passes.");
++}
++
++static void example_test_allocation(struct kunit *test)
++{
++                char *buffer = kunit_kzalloc(test, 16, GFP_KERNEL);
++                /* Ensure allocation succeeded. */
++                KUNIT_ASSERT_NOT_ERR_OR_NULL(test, buffer);
++
++                KUNIT_ASSERT_STREQ(test, buffer, "");
++}
++
++static void list_del_init_test(struct kunit *test)
++{
++	struct list_head a, b;
++	LIST_HEAD(list);
++	
++	list_add_tail(&a, &list);
++	list_add_tail(&b, &list);
++
++        //before: [list] ->a ->b
++	list_del_init(&a);
++ 	
++	//after: [list] ->b, a initialized
++	KUNIT_EXPECT_EQ(test, list.next, &b);
++	KUNIT_EXPECT_EQ(test, b.prev, &list);
++	KUNIT_EXPECT_TRUE(test, list_empty_careful(&a));
++}
++
++static void test_strcmp(struct kunit *test)
++{
++	char * s1 = "testing\n";
++	char * s2 = print_char();
++	KUNIT_EXPECT_EQ(test, 0, strcmp(s1,s2));
++}
++
++static void test_compare_kalloc(struct kunit *test)
++{
++	void* k1 = kmalloc(16, GFP_KERNEL);
++	void* k2 = kmalloc(16, GFP_KERNEL);
++	KUNIT_EXPECT_EQ(test, 0, compare_kalloc(k1,k2));
++}
++
++
++static void test_compare_pages(struct kunit *test)
++{
++
++	void* p1 = alloc_page(GFP_KERNEL);
++	void* p2 = alloc_page(GFP_KERNEL);
++	KUNIT_EXPECT_EQ(test, 0, compare_pages(p1,p2));
++}
++
++static void test_compare_pages_in_order(struct kunit *test)
++{
++	struct page *p1 = alloc_pages(GFP_KERNEL,1);
++	struct page *p2 = alloc_page(GFP_KERNEL);
++	struct list_head *lh = &p2->lru;
++	struct list_head *nh = lh->next;
++	//struct list_head *lh = p2->lru.next;
++
++	p2 = container_of(lh, struct page, lru);
++	KUNIT_EXPECT_EQ(test, 0, compare_pages(p1,p2));
++}
++
++
++static void test_compare_pages_in_order2(struct kunit *test)
++{
++	struct page *pages = alloc_pages(GFP_KERNEL,1);
++	struct page *p1;
++	p1 = kmap(pages);
++	struct page *p2;
++	struct list_head *lh;
++	lh = &pages->lru;
++	//struct list_head *nh = lh->next;
++	//struct list_head *nh = lh->next;
++	//struct list_head *lh = p2->lru.next;
++
++	//p2 = container_of(lh->next, struct page, lru);
++	p2 = p1 + PAGE_SIZE;
++	//printk(KERN_INFO "list: %p, list->next: %p",lh, lh->next);
++	KUNIT_EXPECT_EQ(test, 0, compare_pages(p1,p2));
++}
++
++
++static void test_compare_pages_in_order3(struct kunit *test)
++{
++	struct page *pages = alloc_pages(GFP_KERNEL,1);
++	struct page *p1;
++	p1 = kmap_to_page(&pages[0]);
++	struct page *p2;
++	p2 = kmap_to_page(&pages[1]);
++	KUNIT_EXPECT_EQ(test, 0, compare_pages(p1,p2));
++}
++
++static void test_compare_pages_in_order4(struct kunit *test)
++{
++	struct page *pages = alloc_pages(GFP_KERNEL,1);
++	struct page *p1;
++	p1 = kmap_to_page(&pages[0]);
++	struct page *px;
++	px = kmap_to_page(&pages[1]);
++	struct list_head *lh = &p1->lru;
++	struct list_head *nh = lh->next;
++	//struct list_head *lh = p2->lru.next;
++
++	struct page *p2;
++	p2 = container_of(nh, struct page, lru);
++	KUNIT_EXPECT_EQ(test, 0, compare_pages(p1,p2));
++}
++
++static struct kunit_case misc_example_test_cases[] = {
++	KUNIT_CASE(misc_example_add_test_basic),
++	//KUNIT_CASE(misc_example_test_failure),
++	KUNIT_CASE(example_test_allocation),
++	KUNIT_CASE(test_print_char_size),
++	KUNIT_CASE(test_print_char_input),
++	KUNIT_CASE(test_print_char),
++	KUNIT_CASE(test_compare_char_each),
++	KUNIT_CASE(test_compare_char_each_input),
++	KUNIT_CASE(list_del_init_test),
++	KUNIT_CASE(test_strcmp),
++	KUNIT_CASE(test_compare_kalloc),
++	KUNIT_CASE(test_compare_pages),
++	KUNIT_CASE(test_compare_pages_in_order),
++	KUNIT_CASE(test_compare_pages_in_order2),
++	KUNIT_CASE(test_compare_pages_in_order3),
++	KUNIT_CASE(test_compare_pages_in_order4),
++	{}
++};
++
++static struct kunit_suite misc_example_test_suite = {
++	.name = "misc-example",
++	.test_cases = misc_example_test_cases,
++};
++kunit_test_suite(misc_example_test_suite);
++
